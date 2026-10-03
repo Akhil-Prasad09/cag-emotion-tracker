@@ -182,12 +182,8 @@ class FaceDetector:
         else:
             gray = crop
 
-        # CLAHE — boosts local contrast (especially eyebrows, mouth corners)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
-        enhanced = clahe.apply(gray)
-
-        # Resize
-        resized = cv2.resize(enhanced, (self.face_size, self.face_size),
+        # No contrast enhancement: the CNN was trained on raw FER-2013 crops
+        resized = cv2.resize(gray, (self.face_size, self.face_size),
                              interpolation=cv2.INTER_AREA)
 
         # Normalise to [0, 1]

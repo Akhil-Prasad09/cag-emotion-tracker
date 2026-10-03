@@ -12,7 +12,9 @@ Supports two dataset modes:
 import argparse
 import sys
 from pathlib import Path
-from torch.utils.data import DataLoader
+import json
+import torch
+from torch.utils.data import DataLoader, Subset
 
 from src.modules.trainer import EmotionTrainer, EmotionDataset, FERCSVDataset
 
@@ -57,20 +59,54 @@ def main():
     if args.fer_csv:
         train_ds = FERCSVDataset(args.fer_csv, split="Training", augment=True)
         val_ds   = FERCSVDataset(args.fer_csv, split="PublicTest", augment=False)
+        test_ds  = FERCSVDataset(args.fer_csv, split="PrivateTest", augment=False)
+        clean_ds = FERCSVDataset(args.fer_csv, split="Training", augment=False)
     else:
-        train_ds = EmotionDataset(Path(args.data) / "train", augment=True)
-        val_ds   = EmotionDataset(Path(args.data) / "test",  augment=False)
+        # Hold out 10% of train/ for checkpoint selection; test/ is only scored once, at the end.
+        root = Path(args.data)
+        aug_ds, clean_ds = EmotionDataset(root / "train", augment=True), EmotionDataset(root / "train", augment=False)
+        perm = torch.randperm(len(aug_ds), generator=torch.Generator().manual_seed(0)).tolist()
+        n_val = len(perm) // 10
+        train_ds, val_ds = Subset(aug_ds, perm[n_val:]), Subset(clean_ds, perm[:n_val])
+        clean_ds = Subset(clean_ds, perm[n_val:])
+        test_ds  = EmotionDataset(root / "test", augment=False)
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch,
-                              shuffle=True, num_workers=2, pin_memory=True)
-    val_loader   = DataLoader(val_ds,   batch_size=args.batch,
-                              shuffle=False, num_workers=2, pin_memory=True)
+    def loader(ds, shuffle=False):
+        return DataLoader(ds, batch_size=args.batch, shuffle=shuffle,
+                          num_workers=4, persistent_workers=True)
 
-    history = trainer.train(train_loader, val_loader)
+    history = trainer.train(loader(train_ds, shuffle=True), loader(val_ds))
     print("\nTraining complete. History (last 5 epochs):")
     for h in history[-5:]:
         print(f"  Epoch {h['epoch']}: loss={h['loss']:.4f} "
               f"train={h['train_acc']:.4f} val={h['val_acc']:.4f}")
+
+    # Prototypes = per-class mean embedding of the best checkpoint over the clean train split
+    trainer.update_cache(loader(clean_ds))
+    report = evaluate(trainer, loader(test_ds), args.cache_out)
+    report.update(epochs=args.epochs, best_val_acc=max(h["val_acc"] for h in history),
+                  train_samples=len(train_ds), test_samples=len(test_ds))
+    Path(args.model_out).with_suffix(".json").write_text(json.dumps(report, indent=2))
+    print(json.dumps(report, indent=2))
+
+
+def evaluate(trainer, test_loader, cache_path):
+    """Test accuracy of the classifier head and of the CAG prototype lookup used at inference."""
+    from src.modules.kv_cache import EmotionKVCache
+    kv = EmotionKVCache(embedding_dim=trainer.embedding_dim)
+    kv.load(cache_path)
+    keys = kv.key_matrix.to(trainer.device)
+    model = trainer.model.eval()
+    head = cag = total = 0
+    with torch.no_grad():
+        for imgs, labels in test_loader:
+            imgs, labels = imgs.to(trainer.device), labels.to(trainer.device)
+            logits, emb = model(imgs)
+            head += (logits.argmax(1) == labels).sum().item()
+            cag  += ((emb @ keys.T).argmax(1) == labels).sum().item()
+            total += len(labels)
+    return {"test_acc_classifier_head": round(head / total, 4),
+            "test_acc_cag_lookup": round(cag / total, 4)}
 
 
 if __name__ == "__main__":

@@ -7,10 +7,10 @@ cache:
 	python main.py --build_cache
 
 train:
-	python -m src.train
+	python -m src.train --data fer2013 --epochs 60 --batch 128
 
 run:
-	python run.py
+	python main.py
 
 streamlit:
 	streamlit run dashboard.py

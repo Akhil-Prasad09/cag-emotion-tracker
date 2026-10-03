@@ -13,7 +13,7 @@ RAG: Query → Encode → HTTP → VectorDB.search(top_k) → re-rank → LLM pr
      Latency: 10ms + 20-100ms (DB) + 5ms (rerank) + 100ms (LLM) = ~135ms+
 
 CAG: Query → Encode → matmul(Q, K^T) → softmax → argmax
-     Latency: 5ms (encode) + 0.3ms (lookup) = ~5.3ms
+     Latency here: ~0.8ms (CNN encode) + ~0.007ms (lookup); ~5ms per frame including face detection
 
 ## KV Cache Internals
 
@@ -50,10 +50,12 @@ Use CAG for 7 base emotions (< 1ms).
 Trigger RAG only when confidence < threshold (ambiguous/novel expressions).
 Result: speed for 95% of frames, accuracy for edge cases.
 
-## Benchmark (typical CPU results)
+## Benchmark (measured, Apple M5 CPU, `python main.py --benchmark`)
 
-Metric    CAG      Baseline(10K-scan)   Speedup
-Mean      5.3ms    147ms                27.7x
-P50       4.9ms    141ms                28.8x
-P95       8.2ms    195ms                23.8x
-FPS       188      6.8                  27.6x
+Each query runs the CNN embedding plus the lookup. The baseline swaps the 7-prototype cache for a brute-force scan over 10,000 stored embeddings.
+
+Metric    CAG       Baseline (10K scan)   Speedup
+Mean      0.84ms    1.17ms                1.4x
+P95       0.87ms    1.21ms                1.4x
+
+The CNN dominates both. The lookup alone takes about 0.007 ms. The comparison above does not include network or database overhead, which an external vector store would add.

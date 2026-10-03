@@ -1,6 +1,6 @@
 # CAG Emotion Tracker
 
-Real-time facial emotion recognition from a webcam, with a Streamlit dashboard. Runs on a laptop CPU at about 5 ms per frame.
+Real-time facial emotion recognition from a webcam, with a Streamlit dashboard. 66.5% accuracy on FER-2013 at about 5 ms per frame on a laptop CPU.
 
 Detects 7 emotions: `angry` · `disgust` · `fear` · `happy` · `neutral` · `sad` · `surprise`
 
@@ -10,25 +10,28 @@ B.Tech mini project (3-person team), 2024–25.
 
 ```
 webcam frame → Haar face detector → 48×48 grayscale crop
-            → 191-D hand-crafted features (LBP texture, Sobel gradient zones, mouth/brow geometry)
-            → MLP classifier (512 → 256), trained on FER-2013
+            → CNN (4 VGG-style conv stages + squeeze-and-excitation attention, 1.3M params)
+            → 512-D L2-normalised embedding
+            → cache lookup: one matmul against a 7 × 512 table of emotion prototypes
             → exponential smoothing across frames (stops the label flickering)
             → overlay / dashboard
 ```
 
-The repo also contains an experimental "cache-augmented" path (`main.py`, `src/modules/cag_engine.py`): a small PyTorch CNN produces an embedding, and the emotion comes from one matrix multiply against a cached 7 × 512 table of class prototypes instead of a classifier head or a retrieval step. That CNN ships **untrained**, so that path is for the architecture and the lookup benchmark, not for predictions. [docs/CAG_EXPLAINED.md](docs/CAG_EXPLAINED.md) walks through the idea.
+"Cache-augmented" means the classification step is a lookup into a small cache that sits in memory. Each prototype is the mean embedding of one emotion over the training set, built once after training. At inference, the label is the prototype with the highest cosine similarity: no classifier head, no retrieval index, no I/O. [docs/CAG_EXPLAINED.md](docs/CAG_EXPLAINED.md) has the details.
 
 ## Results
 
-Measured on the FER-2013 public test split (7,178 images) and an Apple M5 CPU:
+FER-2013 test set (7,178 held-out images, never used for training or checkpoint selection). Latency measured on an Apple M5 CPU.
 
-| Metric | Value |
-|---|---|
-| Test accuracy (7 classes) | **38.2%** (chance ≈ 14%; human agreement on FER-2013 is ~65%) |
-| Best classes (F1) | happy 0.53 · surprise 0.51 |
-| Per-frame latency, face present | 4.8 ms mean · 5.1 ms p95 (detection + features + MLP) |
+| | Test accuracy | Per-frame latency |
+|---|---|---|
+| **CNN + prototype cache (default)** | **66.5%** | 4.9 ms mean · 5.2 ms p95 |
+| CNN + classifier head | 66.3% | — |
+| Baseline: hand-crafted features + MLP (`run.py`) | 38.2% | 4.8 ms |
 
-Hand-crafted features cap accuracy well below CNNs, which reach roughly 65–73% on this dataset. Training the CNN in `src/` is the obvious next step (see below).
+For reference, chance is about 14% and human agreement on FER-2013 is about 65%. Most of the per-frame latency is face detection: the CNN takes 0.8 ms and the cache lookup 0.007 ms.
+
+Training: 60 epochs, AdamW + cosine schedule, label smoothing, flip/rotation/brightness augmentation, 10% of the train split held out for checkpoint selection. About 20 minutes on an Apple M5 GPU (MPS). Full numbers are in [models/emotion_cnn.json](models/emotion_cnn.json).
 
 ## Run it
 
@@ -38,9 +41,9 @@ Needs Python 3.10–3.12.
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-python run.py                    # OpenCV window: Q quit · R reset smoothing · S screenshot
+python main.py                   # OpenCV window: Q quit · R reset smoothing · S screenshot
 streamlit run dashboard.py       # web dashboard: live demo, benchmark, cache inspector
-python run.py --benchmark        # latency benchmark
+python main.py --benchmark       # cache lookup vs brute-force scan benchmark
 python -m pytest tests -q        # tests, including a headless dashboard check
 ```
 
@@ -48,32 +51,31 @@ macOS asks for camera permission the first time. Grant it to your terminal.
 
 ## Retrain
 
-Download [FER-2013](https://www.kaggle.com/datasets/msambare/fer2013) and unzip it next to the scripts as `fer2013/train` and `fer2013/test`, then:
+Download [FER-2013](https://www.kaggle.com/datasets/msambare/fer2013) and unzip it as `fer2013/train` and `fer2013/test`, then:
 
 ```bash
-python train_on_fer2013.py       # ~3–5 min on CPU, overwrites models/fer_classifier.pkl
-python calibrate.py              # optional: fit to your own face from 40 webcam frames per emotion
-python -m src.train              # train the experimental CNN for the cache-augmented path
+python -m src.train --data fer2013 --epochs 60 --batch 128
 ```
 
-`models/fer_classifier.pkl` was saved with scikit-learn 1.7.2, which is why that version is pinned. If you change it, retrain.
+This writes `models/emotion_cnn.pt`, rebuilds the prototype cache in `cache/emotion_cache.pt`, and saves test accuracy to `models/emotion_cnn.json`. It uses CUDA or Apple MPS when available.
+
+The hand-crafted baseline has its own scripts: `train_on_fer2013.py` trains it, `calibrate.py` fits it to your face from webcam samples, and `python run.py` runs it. `models/fer_classifier.pkl` was saved with scikit-learn 1.7.2, which is why that version is pinned.
 
 ## Layout
 
 ```
-run.py                     OpenCV app (trained model)
-dashboard.py               Streamlit dashboard (trained model)
-main.py                    experimental CNN + prototype-cache pipeline
-train_on_fer2013.py        trains models/fer_classifier.pkl on FER-2013
-calibrate.py               per-user calibration from webcam samples
-build_fer_model.py         original synthetic-face bootstrap model (superseded by train_on_fer2013.py)
+main.py                    OpenCV app (CNN + prototype cache)
+dashboard.py               Streamlit dashboard (CNN + prototype cache)
+src/train.py               training entry point
 src/modules/
-  sklearn_engine.py        feature extraction + MLP inference + smoothing
-  cag_engine.py            CNN → prototype-cache inference
-  kv_cache.py              the 7-prototype cache
-  emotion_cnn.py           depthwise-separable CNN with squeeze-and-excitation
+  emotion_cnn.py           the CNN
+  kv_cache.py              the 7-prototype cache and its lookup
+  cag_engine.py            detect → embed → lookup → smooth, per frame
   face_detector.py         Haar / OpenCV DNN face detection
-  trainer.py               CNN training loop
+  trainer.py               training loop + prototype rebuild
+  sklearn_engine.py        hand-crafted-feature baseline
 src/utils/                 benchmark + OpenCV overlay
+run.py, train_on_fer2013.py, calibrate.py, build_fer_model.py   baseline scripts
+models/                    trained weights + metrics
 tests/
 ```

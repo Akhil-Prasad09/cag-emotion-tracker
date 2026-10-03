@@ -2,8 +2,8 @@
 emotion_cnn.py
 --------------
 Lightweight CNN for facial emotion feature extraction.
-Architecture: 4-block depthwise-separable CNN → global avg pool → 512-D embedding.
-Designed for real-time use; ~0.8M parameters, ~5ms on CPU per frame.
+Architecture: 4-stage VGG-style CNN + squeeze-and-excitation → global avg pool → 512-D embedding.
+~1.4M parameters, small enough for real-time CPU inference.
 """
 
 import torch
@@ -11,29 +11,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class DepthwiseSeparableConv(nn.Module):
-    """
-    Depthwise-separable convolution block.
-    Much cheaper than standard conv while retaining representational power.
-    Depthwise: applies a single filter per input channel.
-    Pointwise: 1x1 conv to project to output channels.
-    """
-    def __init__(self, in_channels: int, out_channels: int, stride: int = 1):
-        super().__init__()
-        self.depthwise = nn.Conv2d(
-            in_channels, in_channels,
-            kernel_size=3, stride=stride, padding=1,
-            groups=in_channels, bias=False
-        )
-        self.pointwise = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False)
-        self.bn = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU6(inplace=True)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.depthwise(x)
-        x = self.pointwise(x)
-        x = self.bn(x)
-        return self.relu(x)
+def conv_stage(in_channels: int, out_channels: int) -> nn.Sequential:
+    """Two 3x3 conv + BN + ReLU layers, then 2x2 max-pool (halves the feature map)."""
+    return nn.Sequential(
+        nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False),
+        nn.BatchNorm2d(out_channels),
+        nn.ReLU(inplace=True),
+        nn.Conv2d(out_channels, out_channels, 3, padding=1, bias=False),
+        nn.BatchNorm2d(out_channels),
+        nn.ReLU(inplace=True),
+        nn.MaxPool2d(2),
+    )
 
 
 class SEBlock(nn.Module):
@@ -66,32 +54,22 @@ class EmotionCNN(nn.Module):
     Input : (B, 1, 48, 48) — grayscale face crop
     Output: (B, 512)        — L2-normalised embedding used in CAG lookup
 
-    Block structure:
-      Block 1: 1→32   ch, stride 1  → 48x48 feature map
-      Block 2: 32→64  ch, stride 2  → 24x24 feature map
-      Block 3: 64→128 ch, stride 2  → 12x12 feature map
-      Block 4: 128→256 ch, stride 2  → 6x6  feature map
-      SE attention on 256-ch maps
-      Global average pool → 256-D
-      FC projection 256→512 → L2 norm
+    Stages (two 3x3 convs + max-pool each): 1→32 (24x24), 32→64 (12x12),
+    64→128 (6x6), 128→256 (3x3), SE attention, global average pool → 256-D,
+    FC projection 256→512 → L2 norm
     """
     def __init__(self, embedding_dim: int = 512, num_emotions: int = 7):
         super().__init__()
         self.embedding_dim = embedding_dim
         self.num_emotions = num_emotions
 
-        # Entry conv (standard) — captures low-level edges/textures
-        self.entry = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(32),
-            nn.ReLU6(inplace=True)
+        # 4 VGG-style stages: 48 -> 24 -> 12 -> 6 -> 3
+        self.features = nn.Sequential(
+            conv_stage(1, 32),
+            conv_stage(32, 64),
+            conv_stage(64, 128),
+            conv_stage(128, 256),
         )
-
-        # DS-Conv blocks
-        self.block1 = DepthwiseSeparableConv(32, 32, stride=1)
-        self.block2 = DepthwiseSeparableConv(32, 64, stride=2)
-        self.block3 = DepthwiseSeparableConv(64, 128, stride=2)
-        self.block4 = DepthwiseSeparableConv(128, 256, stride=2)
 
         # Channel attention — focuses on emotionally discriminative feature maps
         self.se = SEBlock(256, reduction=8)
@@ -125,11 +103,7 @@ class EmotionCNN(nn.Module):
         Extract normalised 512-D embedding.
         This is the vector compared against the KV cache during inference.
         """
-        x = self.entry(x)
-        x = self.block1(x)
-        x = self.block2(x)
-        x = self.block3(x)
-        x = self.block4(x)
+        x = self.features(x)
         x = self.se(x)              # attention re-weighting
         x = self.gap(x).flatten(1)  # (B, 256)
         x = self.dropout(x)

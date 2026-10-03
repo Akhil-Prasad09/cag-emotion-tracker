@@ -248,7 +248,7 @@ class CAGEngine:
 
     def _face_to_tensor(self, face_crop: np.ndarray) -> torch.Tensor:
         """Convert (48,48) float32 numpy array → (1,1,48,48) tensor on device."""
-        t = torch.from_numpy(face_crop).unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
+        t = torch.from_numpy((face_crop - 0.5) / 0.5).unsqueeze(0).unsqueeze(0)  # (1,1,H,W), same scaling as training
         return t.to(self.device)
 
     def _calc_fps(self) -> float:

@@ -55,10 +55,12 @@ def test_live_demo_streams(monkeypatch):
 
 
 def test_engine_on_real_face():
-    from src.modules.sklearn_engine import SklearnEmotionEngine
-    engine = SklearnEmotionEngine(model_path=str(ROOT / "models/fer_classifier.pkl"))
-    engine.load()
+    from src.modules.cag_engine import CAGEngine
+    engine = CAGEngine(cache_path=str(ROOT / "cache/emotion_cache.pt"),
+                       model_path=str(ROOT / "models/emotion_cnn.pt"))
+    engine.load(model_dir=str(ROOT / "models"))
     r = engine.infer(_face_frame())
     assert r["face_found"]
+    assert r["emotion"] == "happy", r["smooth_scores"]
     assert abs(sum(r["smooth_scores"].values()) - 1) < 1e-3
     assert r["latency_ms"] < 200

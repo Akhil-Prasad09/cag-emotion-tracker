@@ -66,10 +66,11 @@ EMOTION_EMOJIS = {
 
 @st.cache_resource
 def load_engine():
-    # The trained FER-2013 model. The CNN path in src/modules/cag_engine.py
-    # has no trained weights, so it would only produce random labels.
-    from src.modules.sklearn_engine import SklearnEmotionEngine
-    engine = SklearnEmotionEngine(model_path="models/fer_classifier.pkl")
+    from src.modules.cag_engine import CAGEngine
+    engine = CAGEngine(
+        cache_path="cache/emotion_cache.pt",
+        model_path="models/emotion_cnn.pt",
+    )
     engine.load()
     return engine
 
@@ -95,16 +96,18 @@ def show_sidebar():
          "📖 Architecture"]
     )
     st.sidebar.markdown("---")
+    temperature = st.sidebar.slider("Cache Temperature", 0.02, 0.3, 0.08, 0.01)
     alpha = st.sidebar.slider("Temporal Smoothing α", 0.1, 0.9, 0.4, 0.05)
     st.sidebar.markdown("---")
     st.sidebar.caption("CAG Engine — ultra-low latency emotion detection")
-    return page, alpha
+    return page, temperature, alpha
 
 
-def show_live_demo(engine, alpha):
+def show_live_demo(engine, temperature, alpha):
     import cv2
 
-    engine.alpha = alpha
+    engine.cache_temperature = temperature
+    engine.smoother.alpha = alpha
 
     st.subheader("🎥 Live Webcam Feed")
     col1, col2 = st.columns([3, 2])
@@ -396,15 +399,15 @@ def show_architecture():
 
 def main():
     show_header()
-    page, alpha = show_sidebar()
+    page, temperature, alpha = show_sidebar()
 
     if "🎥" in page:
         try:
             engine = load_engine()
-            show_live_demo(engine, alpha)
+            show_live_demo(engine, temperature, alpha)
         except Exception as e:
             st.error(f"Engine failed to load: {e}")
-            st.info("Retrain the model with: `python train_on_fer2013.py`")
+            st.info("Retrain the model with: `python -m src.train --data fer2013`")
     elif "📊" in page:
         show_benchmark()
     elif "🗂️" in page:

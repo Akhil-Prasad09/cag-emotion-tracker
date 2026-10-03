@@ -135,7 +135,8 @@ class EmotionTrainer:
         batch_size: int = 64,
     ):
         if device == "auto":
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.device = torch.device("cuda" if torch.cuda.is_available()
+                                       else "mps" if torch.backends.mps.is_available() else "cpu")
         else:
             self.device = torch.device(device)
 
@@ -163,6 +164,7 @@ class EmotionTrainer:
         history = []
 
         for epoch in range(1, self.epochs + 1):
+            t_epoch = time.time()
             self.model.train()
             total_loss, correct, total = 0.0, 0, 0
 
@@ -197,15 +199,12 @@ class EmotionTrainer:
             history.append({"epoch": epoch, "loss": avg_loss,
                              "train_acc": train_acc, "val_acc": val_acc})
 
-            if epoch % 5 == 0 or epoch == 1:
-                print(f"Epoch {epoch:3d}/{self.epochs} | "
-                      f"loss={avg_loss:.4f} train_acc={train_acc:.4f} "
-                      f"val_acc={val_acc:.4f}")
+            print(f"Epoch {epoch:3d}/{self.epochs} | {time.time() - t_epoch:.0f}s | "
+                  f"loss={avg_loss:.4f} train_acc={train_acc:.4f} "
+                  f"val_acc={val_acc:.4f}", flush=True)
 
         print(f"[Trainer] Done. Best val_acc={best_acc:.4f}")
-
-        # Update KV cache with real learned embeddings
-        self._update_cache(train_loader)
+        self.model.load_state_dict(torch.load(self.model_save_path, map_location=self.device))
         return history
 
     def _evaluate(self, loader: DataLoader) -> float:
@@ -219,7 +218,7 @@ class EmotionTrainer:
                 total += len(imgs)
         return correct / total
 
-    def _update_cache(self, loader: DataLoader, n_batches: int = 20) -> None:
+    def update_cache(self, loader: DataLoader) -> None:
         """
         After training, compute per-class mean embeddings and update the KV cache.
         This makes the cache reflect REAL learned representations, not synthetic ones.
@@ -233,13 +232,11 @@ class EmotionTrainer:
         class_counts = torch.zeros(len(EMOTION_LABELS))
 
         with torch.no_grad():
-            for i, (imgs, labels) in enumerate(loader):
-                if i >= n_batches:
-                    break
+            for imgs, labels in loader:
                 imgs = imgs.to(self.device)
                 embs = self.model.extract_embedding(imgs).cpu()
                 for cls in range(len(EMOTION_LABELS)):
-                    mask = (torch.tensor(labels) == cls)
+                    mask = labels == cls
                     if mask.any():
                         class_sums[cls] += embs[mask].sum(0)
                         class_counts[cls] += mask.sum()
