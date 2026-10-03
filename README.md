@@ -26,7 +26,7 @@ FER-2013 test set (7,178 held-out images, never used for training or checkpoint 
 | | Test accuracy | Per-frame latency |
 |---|---|---|
 | **CNN + prototype cache, mirror-averaged (default)** | **70.6%** | 8.2 ms mean · 8.6 ms p95 |
-| CNN + prototype cache, single pass | 69.7% | ~6 ms |
+| CNN + prototype cache, single pass | 69.7% | — |
 | CNN + classifier head, mirror-averaged | 70.6% | — |
 | Baseline: hand-crafted features + MLP (`run.py`) | 38.2% | 4.8 ms |
 
