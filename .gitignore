@@ -1,6 +1,6 @@
 .venv/
 cag_env/
-fer2013/
+fer2013
 __pycache__/
 *.pyc
 .pytest_cache/
