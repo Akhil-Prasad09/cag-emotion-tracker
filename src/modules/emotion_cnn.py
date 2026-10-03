@@ -3,7 +3,7 @@ emotion_cnn.py
 --------------
 Lightweight CNN for facial emotion feature extraction.
 Architecture: 4-stage VGG-style CNN + squeeze-and-excitation → global avg pool → 512-D embedding.
-~1.4M parameters, small enough for real-time CPU inference.
+~5M parameters, about 2 ms per forward pass on a laptop CPU.
 """
 
 import torch
@@ -54,25 +54,23 @@ class EmotionCNN(nn.Module):
     Input : (B, 1, 48, 48) — grayscale face crop
     Output: (B, 512)        — L2-normalised embedding used in CAG lookup
 
-    Stages (two 3x3 convs + max-pool each): 1→32 (24x24), 32→64 (12x12),
-    64→128 (6x6), 128→256 (3x3), SE attention, global average pool → 256-D,
-    FC projection 256→512 → L2 norm
+    Stages (two 3x3 convs + max-pool each): 1→64 (24x24), 64→128 (12x12),
+    128→256 (6x6), 256→512 (3x3), SE attention, global average pool → 512-D,
+    FC projection 512→512 → L2 norm
     """
-    def __init__(self, embedding_dim: int = 512, num_emotions: int = 7):
+    def __init__(self, embedding_dim: int = 512, num_emotions: int = 7,
+                 widths: tuple = (64, 128, 256, 512)):
         super().__init__()
         self.embedding_dim = embedding_dim
         self.num_emotions = num_emotions
 
         # 4 VGG-style stages: 48 -> 24 -> 12 -> 6 -> 3
         self.features = nn.Sequential(
-            conv_stage(1, 32),
-            conv_stage(32, 64),
-            conv_stage(64, 128),
-            conv_stage(128, 256),
+            *[conv_stage(c_in, c_out) for c_in, c_out in zip((1,) + widths[:-1], widths)]
         )
 
         # Channel attention — focuses on emotionally discriminative feature maps
-        self.se = SEBlock(256, reduction=8)
+        self.se = SEBlock(widths[-1], reduction=8)
 
         # Global average pool → compact descriptor
         self.gap = nn.AdaptiveAvgPool2d(1)
@@ -81,7 +79,7 @@ class EmotionCNN(nn.Module):
         self.dropout = nn.Dropout(0.3)
 
         # Project to embedding space
-        self.embed_proj = nn.Linear(256, embedding_dim)
+        self.embed_proj = nn.Linear(widths[-1], embedding_dim)
 
         # Separate classification head (used during training, bypassed in CAG)
         self.classifier = nn.Linear(embedding_dim, num_emotions)

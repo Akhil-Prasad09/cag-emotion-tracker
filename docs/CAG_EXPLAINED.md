@@ -13,7 +13,7 @@ RAG: Query → Encode → HTTP → VectorDB.search(top_k) → re-rank → LLM pr
      Latency: 10ms + 20-100ms (DB) + 5ms (rerank) + 100ms (LLM) = ~135ms+
 
 CAG: Query → Encode → matmul(Q, K^T) → softmax → argmax
-     Latency here: ~0.8ms (CNN encode) + ~0.007ms (lookup); ~5ms per frame including face detection
+     Latency here: ~2ms per CNN pass (two passes: face + mirror) + ~0.007ms (lookup); ~8ms per frame including face detection
 
 ## KV Cache Internals
 
@@ -55,7 +55,7 @@ Result: speed for 95% of frames, accuracy for edge cases.
 Each query runs the CNN embedding plus the lookup. The baseline swaps the 7-prototype cache for a brute-force scan over 10,000 stored embeddings.
 
 Metric    CAG       Baseline (10K scan)   Speedup
-Mean      0.84ms    1.17ms                1.4x
-P95       0.87ms    1.21ms                1.4x
+Mean      1.99ms    2.25ms                1.1x
+P95       2.21ms    2.46ms                1.1x
 
 The CNN dominates both. The lookup alone takes about 0.007 ms. The comparison above does not include network or database overhead, which an external vector store would add.

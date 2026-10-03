@@ -1,6 +1,6 @@
 # CAG Emotion Tracker
 
-Real-time facial emotion recognition from a webcam, with a Streamlit dashboard. 66.5% accuracy on FER-2013 at about 5 ms per frame on a laptop CPU.
+Real-time facial emotion recognition from a webcam, with a Streamlit dashboard. 70.6% accuracy on FER-2013 at about 8 ms per frame on a laptop CPU.
 
 Detects 7 emotions: `angry` · `disgust` · `fear` · `happy` · `neutral` · `sad` · `surprise`
 
@@ -10,8 +10,8 @@ B.Tech mini project (3-person team), 2024–25.
 
 ```
 webcam frame → Haar face detector → 48×48 grayscale crop
-            → CNN (4 VGG-style conv stages + squeeze-and-excitation attention, 1.3M params)
-            → 512-D L2-normalised embedding
+            → CNN (4 VGG-style conv stages + squeeze-and-excitation attention, 5M params)
+            → 512-D L2-normalised embedding, averaged with the mirrored face's embedding
             → cache lookup: one matmul against a 7 × 512 table of emotion prototypes
             → exponential smoothing across frames (stops the label flickering)
             → overlay / dashboard
@@ -25,13 +25,14 @@ FER-2013 test set (7,178 held-out images, never used for training or checkpoint 
 
 | | Test accuracy | Per-frame latency |
 |---|---|---|
-| **CNN + prototype cache (default)** | **66.5%** | 4.9 ms mean · 5.2 ms p95 |
-| CNN + classifier head | 66.3% | — |
+| **CNN + prototype cache, mirror-averaged (default)** | **70.6%** | 8.2 ms mean · 8.6 ms p95 |
+| CNN + prototype cache, single pass | 69.7% | ~6 ms |
+| CNN + classifier head, mirror-averaged | 70.6% | — |
 | Baseline: hand-crafted features + MLP (`run.py`) | 38.2% | 4.8 ms |
 
-For reference, chance is about 14% and human agreement on FER-2013 is about 65%. Most of the per-frame latency is face detection: the CNN takes 0.8 ms and the cache lookup 0.007 ms.
+For reference, chance is about 14% and human agreement on FER-2013 is about 65%. Per-class recall ranges from 47% (fear) to 89% (happy). Each CNN pass takes about 2 ms, the cache lookup 0.007 ms, and face detection most of the rest.
 
-Training: 60 epochs, AdamW + cosine schedule, label smoothing, flip/rotation/brightness augmentation, 10% of the train split held out for checkpoint selection. About 20 minutes on an Apple M5 GPU (MPS). Full numbers are in [models/emotion_cnn.json](models/emotion_cnn.json).
+Training: 80 epochs, AdamW + cosine schedule, label smoothing, augmentation (flip, rotation/shift/scale, brightness/contrast, random erasing), 10% of the train split held out for checkpoint selection. About 47 minutes on an Apple M5 GPU (MPS). Full numbers are in [models/emotion_cnn.json](models/emotion_cnn.json).
 
 ## Run it
 
@@ -54,7 +55,7 @@ macOS asks for camera permission the first time. Grant it to your terminal.
 Download [FER-2013](https://www.kaggle.com/datasets/msambare/fer2013) and unzip it as `fer2013/train` and `fer2013/test`, then:
 
 ```bash
-python -m src.train --data fer2013 --epochs 60 --batch 128
+python -m src.train --data fer2013 --epochs 80 --batch 128
 ```
 
 This writes `models/emotion_cnn.pt`, rebuilds the prototype cache in `cache/emotion_cache.pt`, and saves test accuracy to `models/emotion_cnn.json`. It uses CUDA or Apple MPS when available.

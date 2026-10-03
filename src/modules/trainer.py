@@ -61,10 +61,11 @@ class EmotionDataset(Dataset):
                 transforms.Grayscale(1),
                 transforms.Resize((48, 48)),
                 transforms.RandomHorizontalFlip(),
-                transforms.RandomRotation(10),
+                transforms.RandomAffine(degrees=10, translate=(0.1, 0.1), scale=(0.9, 1.1)),
                 transforms.ColorJitter(brightness=0.3, contrast=0.3),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.5], std=[0.5]),
+                transforms.RandomErasing(p=0.5, scale=(0.02, 0.15)),
             ])
         else:
             self.transform = transforms.Compose([

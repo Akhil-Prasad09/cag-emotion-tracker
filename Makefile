@@ -7,7 +7,7 @@ cache:
 	python main.py --build_cache
 
 train:
-	python -m src.train --data fer2013 --epochs 60 --batch 128
+	python -m src.train --data fer2013 --epochs 80 --batch 128
 
 run:
 	python main.py

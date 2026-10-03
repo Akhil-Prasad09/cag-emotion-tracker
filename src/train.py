@@ -102,6 +102,8 @@ def evaluate(trainer, test_loader, cache_path):
         for imgs, labels in test_loader:
             imgs, labels = imgs.to(trainer.device), labels.to(trainer.device)
             logits, emb = model(imgs)
+            logits_f, emb_f = model(torch.flip(imgs, dims=[3]))   # test-time flip averaging
+            logits, emb = logits + logits_f, emb + emb_f
             head += (logits.argmax(1) == labels).sum().item()
             cag  += ((emb @ keys.T).argmax(1) == labels).sum().item()
             total += len(labels)

@@ -1,8 +1,8 @@
 {
-  "test_acc_classifier_head": 0.6634,
-  "test_acc_cag_lookup": 0.6652,
-  "epochs": 60,
-  "best_val_acc": 0.6599303135888501,
+  "test_acc_classifier_head": 0.7058,
+  "test_acc_cag_lookup": 0.7062,
+  "epochs": 80,
+  "best_val_acc": 0.7013937282229965,
   "train_samples": 25839,
   "test_samples": 7178
 }
