@@ -1,0 +1,17 @@
+{
+  "emotions": [
+    "angry",
+    "disgust",
+    "fear",
+    "happy",
+    "neutral",
+    "sad",
+    "surprise"
+  ],
+  "feature_dim": 191,
+  "model_type": "MLP_512_256_fer2013",
+  "train_acc": 0.9408169829527179,
+  "test_acc": 0.42815814850530376,
+  "trained_on": "FER2013_real_data",
+  "samples": 12436
+}
