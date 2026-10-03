@@ -1,0 +1,8 @@
+.venv/
+cag_env/
+fer2013/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+screenshot_*.png

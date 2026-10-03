@@ -94,6 +94,7 @@ class CAGEngine:
         self.cache_path = cache_path
         self.model_path = model_path
         self.cache_temperature = cache_temperature
+        self.prefer_dnn_detector = prefer_dnn_detector
 
         # Sub-modules (initialised in load())
         self.cnn: Optional[EmotionCNN] = None
@@ -149,7 +150,7 @@ class CAGEngine:
         self.face_detector = FaceDetector(
             model_dir=model_dir,
             face_size=48,
-            prefer_dnn=prefer_dnn_detector
+            prefer_dnn=self.prefer_dnn_detector
         )
 
         elapsed = (time.perf_counter() - t0) * 1000

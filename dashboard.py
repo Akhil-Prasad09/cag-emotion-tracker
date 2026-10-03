@@ -66,11 +66,10 @@ EMOTION_EMOJIS = {
 
 @st.cache_resource
 def load_engine():
-    from src.modules.cag_engine import CAGEngine
-    engine = CAGEngine(
-        cache_path="cache/emotion_cache.pt",
-        model_path="models/emotion_cnn.pt",
-    )
+    # The trained FER-2013 model. The CNN path in src/modules/cag_engine.py
+    # has no trained weights, so it would only produce random labels.
+    from src.modules.sklearn_engine import SklearnEmotionEngine
+    engine = SklearnEmotionEngine(model_path="models/fer_classifier.pkl")
     engine.load()
     return engine
 
@@ -96,19 +95,16 @@ def show_sidebar():
          "📖 Architecture"]
     )
     st.sidebar.markdown("---")
-    temperature = st.sidebar.slider("Cache Temperature", 0.02, 0.3, 0.08, 0.01)
     alpha = st.sidebar.slider("Temporal Smoothing α", 0.1, 0.9, 0.4, 0.05)
     st.sidebar.markdown("---")
     st.sidebar.caption("CAG Engine — ultra-low latency emotion detection")
-    return page, temperature, alpha
+    return page, alpha
 
 
-def show_live_demo(engine, temperature, alpha):
+def show_live_demo(engine, alpha):
     import cv2
-    import torch
 
-    engine.cache_temperature = temperature
-    engine.smoother.alpha = alpha
+    engine.alpha = alpha
 
     st.subheader("🎥 Live Webcam Feed")
     col1, col2 = st.columns([3, 2])
@@ -162,7 +158,7 @@ def show_live_demo(engine, temperature, alpha):
 
         # Display frame
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img_placeholder.image(rgb, channels="RGB", use_column_width=True)
+        img_placeholder.image(rgb, channels="RGB", width="stretch")
 
         # Emotion display
         if result["face_found"]:
@@ -188,19 +184,14 @@ def show_live_demo(engine, temperature, alpha):
 
             # Score bars
             smooth = result["smooth_scores"]
-            scores_md = "**Score Distribution**\n"
-            for emo, sc in sorted(smooth.items(), key=lambda x: -x[1]):
-                pct = int(sc * 100)
-                bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
-                scores_placeholder.text(
-                    "\n".join(
-                        f"{e:<10} {int(s*100):3d}% |{'█'*int(s*20)}"
-                        for e, s in sorted(smooth.items(), key=lambda x: -x[1])
-                    )
+            scores_placeholder.text(
+                "\n".join(
+                    f"{e:<10} {int(s*100):3d}% |{'█'*int(s*20)}"
+                    for e, s in sorted(smooth.items(), key=lambda x: -x[1])
                 )
+            )
 
         # Perf metrics
-        stats = engine.perf_stats()
         lat = result["latency_ms"]
         fps = result["fps"]
         lat_color = "green" if lat < 50 else "orange" if lat < 100 else "red"
@@ -266,7 +257,7 @@ def show_benchmark():
             paper_bgcolor="#0f1117", plot_bgcolor="#1e2130",
             font_color="#ccc",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig)
 
         st.markdown(f"""
         ### Why CAG is faster
@@ -290,7 +281,8 @@ def show_cache_inspector():
 
     try:
         import torch
-        cache_data = torch.load("cache/emotion_cache.pt", map_location="cpu")
+        cache_data = torch.load("cache/emotion_cache.pt", map_location="cpu",
+                                weights_only=False)  # dict with labels + metadata
         key_matrix = cache_data["key_matrix"].numpy()
         labels = cache_data["labels"]
         meta = cache_data.get("metadata", {})
@@ -311,7 +303,7 @@ def show_cache_inspector():
                     "Dominance": m.get("dominance", 0),
                 })
             df = pd.DataFrame(rows).set_index("Emotion")
-            st.dataframe(df.style.background_gradient(cmap="RdYlGn", axis=None))
+            st.dataframe(df)
 
         # Inter-prototype cosine similarity heatmap
         import torch.nn.functional as F
@@ -331,7 +323,7 @@ def show_cache_inspector():
             paper_bgcolor="#0f1117",
             font_color="#ccc",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig)
 
         st.markdown("""
         **Reading the matrix:**
@@ -404,15 +396,15 @@ def show_architecture():
 
 def main():
     show_header()
-    page, temperature, alpha = show_sidebar()
+    page, alpha = show_sidebar()
 
     if "🎥" in page:
         try:
             engine = load_engine()
-            show_live_demo(engine, temperature, alpha)
+            show_live_demo(engine, alpha)
         except Exception as e:
             st.error(f"Engine failed to load: {e}")
-            st.info("Make sure you have run: `python main.py --build_cache`")
+            st.info("Retrain the model with: `python train_on_fer2013.py`")
     elif "📊" in page:
         show_benchmark()
     elif "🗂️" in page:

@@ -100,7 +100,7 @@ def draw_overlay(frame, result):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.42, lat_c, 1)
     cv2.putText(frame, f"FPS {fps:.1f}", (10,h-22),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.42, (180,180,180), 1)
-    cv2.putText(frame, "CAG | HOG+RF", (10,h-8),
+    cv2.putText(frame, "CAG | MLP", (10,h-8),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.32, (70,70,70), 1)
     return frame
 

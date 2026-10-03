@@ -1,166 +1,79 @@
-# 🧠 CAG Emotion Tracker
-### Cache-Augmented Generation for Real-Time Emotion Detection
+# CAG Emotion Tracker
 
-A production-level AI system that detects human emotions from webcam input using a custom **Cache-Augmented Generation (CAG)** inference engine — achieving <50ms end-to-end latency without any external API, vector database, or retrieval pipeline.
+Real-time facial emotion recognition from a webcam, with a Streamlit dashboard. Runs on a laptop CPU at about 5 ms per frame.
 
----
+Detects 7 emotions: `angry` · `disgust` · `fear` · `happy` · `neutral` · `sad` · `surprise`
 
-## 📁 Project Structure
+B.Tech mini project (3-person team), 2024–25.
+
+## How it works
 
 ```
-cag_emotion/
-├── main.py                        # Entry point (OpenCV / Streamlit / benchmark)
-├── dashboard.py                   # Streamlit web UI
-├── requirements.txt
-│
-├── src/
-│   ├── build_cache.py             # Build KV cache (run once)
-│   ├── train.py                   # Training entry point
-│   │
-│   ├── modules/
-│   │   ├── emotion_cnn.py         # Lightweight CNN (DS-Conv + SE attention)
-│   │   ├── kv_cache.py            # KV Cache — core CAG data structure
-│   │   ├── face_detector.py       # OpenCV face detection + crop pipeline
-│   │   ├── cag_engine.py          # Full CAG inference engine (orchestrator)
-│   │   └── trainer.py             # Training + cache update pipeline
-│   │
-│   └── utils/
-│       ├── visualiser.py          # Real-time OpenCV overlay renderer
-│       └── benchmark.py           # CAG vs baseline performance benchmark
-│
-├── cache/
-│   └── emotion_cache.pt           # Serialised KV cache (auto-generated)
-│
-├── models/
-│   └── emotion_cnn.pt             # Trained CNN weights (after training)
-│
-└── tests/
-    ├── test_cache.py
-    └── test_cnn.py
+webcam frame → Haar face detector → 48×48 grayscale crop
+            → 191-D hand-crafted features (LBP texture, Sobel gradient zones, mouth/brow geometry)
+            → MLP classifier (512 → 256), trained on FER-2013
+            → exponential smoothing across frames (stops the label flickering)
+            → overlay / dashboard
 ```
 
----
+The repo also contains an experimental "cache-augmented" path (`main.py`, `src/modules/cag_engine.py`): a small PyTorch CNN produces an embedding, and the emotion comes from one matrix multiply against a cached 7 × 512 table of class prototypes instead of a classifier head or a retrieval step. That CNN ships **untrained**, so that path is for the architecture and the lookup benchmark, not for predictions. [docs/CAG_EXPLAINED.md](docs/CAG_EXPLAINED.md) walks through the idea.
 
-## 🚀 Quick Start
+## Results
 
-### 1. Install dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Build the KV cache (run once)
-```bash
-python main.py --build_cache
-```
-
-### 3. Run real-time emotion detection
-```bash
-# OpenCV window (default)
-python main.py
-
-# Streamlit dashboard (web UI)
-python main.py --streamlit
-
-# Run performance benchmark
-python main.py --benchmark
-```
-
-### 4. (Optional) Train on FER-2013 dataset
-```bash
-# Download FER-2013 from Kaggle, then:
-python -m src.train --fer_csv fer2013.csv --epochs 50
-```
-
----
-
-## 🧠 How CAG Works
-
-### Traditional RAG (what we DON'T use):
-```
-Query → Encode → HTTP call → Vector DB search → Top-K results → LLM → Answer
-```
-Each step adds latency. Vector DB alone adds 10–100ms.
-
-### Our CAG approach:
-```
-Frame → FaceDetector → CNN embedding → dot product with KV cache → argmax → emotion
-```
-The KV cache is a **7 × 512 tensor pre-loaded into GPU VRAM**.
-Inference = one matrix multiplication. No I/O, no retrieval, no network.
-
-### KV Cache internals:
-```
-KEY   = prototype embedding of emotion class (precomputed, L2-normalised)
-VALUE = emotion label + valence/arousal/dominance metadata
-
-Lookup:
-  similarity = query_embedding @ key_matrix.T    # (1, E) — one matmul
-  attention  = softmax(similarity / temperature) # sharpened distribution
-  emotion    = argmax(attention)                  # O(E) — 7 comparisons
-```
-
----
-
-## ⚡ Performance
+Measured on the FER-2013 public test split (7,178 images) and an Apple M5 CPU:
 
 | Metric | Value |
-|--------|-------|
-| End-to-end latency | ~15–40ms (CPU), ~5–12ms (GPU) |
-| Face detection | ~3ms (Haar) / ~8ms (DNN) |
-| CNN embedding | ~4–8ms (CPU) |
-| KV cache lookup | <0.5ms |
-| Temporal smoothing | <0.1ms |
-| CAG vs naive baseline | **~200–500× faster lookup** |
+|---|---|
+| Test accuracy (7 classes) | **38.2%** (chance ≈ 14%; human agreement on FER-2013 is ~65%) |
+| Best classes (F1) | happy 0.53 · surprise 0.51 |
+| Per-frame latency, face present | 4.8 ms mean · 5.1 ms p95 (detection + features + MLP) |
 
----
+Hand-crafted features cap accuracy well below CNNs, which reach roughly 65–73% on this dataset. Training the CNN in `src/` is the obvious next step (see below).
 
-## 🎭 Emotions Detected
-`angry` · `disgust` · `fear` · `happy` · `neutral` · `sad` · `surprise`
+## Run it
 
----
+Needs Python 3.10–3.12.
 
-## 📊 CAG vs RAG Comparison
-
-| Aspect | CAG (this project) | RAG |
-|--------|-------------------|-----|
-| Knowledge store | In-memory tensor (KB) | External vector DB (GB) |
-| Per-query cost | 7 dot products | O(N) scan + HTTP round-trip |
-| Latency overhead | <0.5ms | 10–200ms |
-| Retrieval step | ❌ None | ✅ Required |
-| Dynamic updates | EMA update (offline) | Real-time insertion |
-| Scalability | Fixed E classes | Scales to millions |
-
-**When to use CAG**: Fixed, small knowledge space where speed is critical.  
-**When to use RAG**: Dynamic, large, heterogeneous knowledge bases.
-
----
-
-## 🔬 Architecture Details
-
-### EmotionCNN (~800K parameters)
-- 4× Depthwise-Separable Conv blocks (MobileNet-style)
-- Squeeze-and-Excitation attention (channel attention = implicit facial region focus)
-- Global Average Pooling → 256-D
-- Linear projection → 512-D L2-normalised embedding
-- Separate classification head (training only; bypassed in CAG mode)
-
-### Temporal Smoothing
-- EMA with α=0.4: `state[t] = 0.4 × raw[t] + 0.6 × state[t-1]`
-- Prevents emotion flickering between frames
-- Auto-resets after 30 consecutive frames without a face
-
----
-
-## 🧪 Run Tests
 ```bash
-python -m pytest tests/ -v
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+python run.py                    # OpenCV window: Q quit · R reset smoothing · S screenshot
+streamlit run dashboard.py       # web dashboard: live demo, benchmark, cache inspector
+python run.py --benchmark        # latency benchmark
+python -m pytest tests -q        # tests, including a headless dashboard check
 ```
 
----
+macOS asks for camera permission the first time. Grant it to your terminal.
 
-## 🔭 Future Improvements
-1. **Hybrid CAG + RAG**: Use CAG for common emotions, trigger RAG for ambiguous/novel cases
-2. **Personalised cache**: Fine-tune prototypes per user using federated learning
-3. **Multi-face tracking**: Maintain separate temporal states per detected face
-4. **Action Unit integration**: Explicit FACS AU detection as auxiliary features
-5. **Context-aware smoothing**: Adaptive α based on prediction confidence variance
+## Retrain
+
+Download [FER-2013](https://www.kaggle.com/datasets/msambare/fer2013) and unzip it next to the scripts as `fer2013/train` and `fer2013/test`, then:
+
+```bash
+python train_on_fer2013.py       # ~3–5 min on CPU, overwrites models/fer_classifier.pkl
+python calibrate.py              # optional: fit to your own face from 40 webcam frames per emotion
+python -m src.train              # train the experimental CNN for the cache-augmented path
+```
+
+`models/fer_classifier.pkl` was saved with scikit-learn 1.7.2, which is why that version is pinned. If you change it, retrain.
+
+## Layout
+
+```
+run.py                     OpenCV app (trained model)
+dashboard.py               Streamlit dashboard (trained model)
+main.py                    experimental CNN + prototype-cache pipeline
+train_on_fer2013.py        trains models/fer_classifier.pkl on FER-2013
+calibrate.py               per-user calibration from webcam samples
+build_fer_model.py         original synthetic-face bootstrap model (superseded by train_on_fer2013.py)
+src/modules/
+  sklearn_engine.py        feature extraction + MLP inference + smoothing
+  cag_engine.py            CNN → prototype-cache inference
+  kv_cache.py              the 7-prototype cache
+  emotion_cnn.py           depthwise-separable CNN with squeeze-and-excitation
+  face_detector.py         Haar / OpenCV DNN face detection
+  trainer.py               CNN training loop
+src/utils/                 benchmark + OpenCV overlay
+tests/
+```

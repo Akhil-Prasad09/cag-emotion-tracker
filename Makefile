@@ -10,10 +10,10 @@ train:
 	python -m src.train
 
 run:
-	python main.py --source 0
+	python run.py
 
 streamlit:
-	streamlit run app.py
+	streamlit run dashboard.py
 
 benchmark:
 	python main.py --benchmark
