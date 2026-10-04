@@ -41,7 +41,7 @@ class EmotionDataset(Dataset):
     """
     LABEL_MAP = {e: i for i, e in enumerate(EMOTION_LABELS)}
 
-    def __init__(self, root: str, augment: bool = True):
+    def __init__(self, root: str, augment: bool = True, strong_jitter: bool = False):
         self.samples: List[Tuple[str, int]] = []
         root = Path(root)
 
@@ -61,7 +61,9 @@ class EmotionDataset(Dataset):
                 transforms.Grayscale(1),
                 transforms.Resize((48, 48)),
                 transforms.RandomHorizontalFlip(),
-                transforms.RandomAffine(degrees=10, translate=(0.1, 0.1), scale=(0.9, 1.1)),
+                # strong_jitter: wider shift/zoom so the model tolerates face-detector framing (used for the web demo)
+                transforms.RandomAffine(degrees=10, translate=(0.15, 0.15) if strong_jitter else (0.1, 0.1),
+                                        scale=(0.8, 1.25) if strong_jitter else (0.9, 1.1)),
                 transforms.ColorJitter(brightness=0.3, contrast=0.3),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.5], std=[0.5]),

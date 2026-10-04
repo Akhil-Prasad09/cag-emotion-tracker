@@ -2,7 +2,7 @@
 Export the trained CNN + prototype cache for the browser demo in web/.
 
     pip install onnx onnxruntime onnxscript
-    python web/export.py [--check-test fer2013/test]
+    python web/export.py [--check-test fer2013/test]      # exports the web model (models/emotion_cnn_web.pt)
 
 Writes web/model.onnx (face crop -> 512-D embedding) and web/prototypes.json,
 then checks ONNX Runtime matches PyTorch. With --check-test it also scores the
@@ -37,10 +37,12 @@ class Embedder(torch.nn.Module):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--check-test", type=str, default=None, help="FER-2013 test dir to score the export on")
+    p.add_argument("--model", default="models/emotion_cnn_web.pt")
+    p.add_argument("--cache", default="cache/emotion_cache_web.pt")
     args = p.parse_args()
 
     cnn = EmotionCNN()
-    cnn.load_state_dict(torch.load(ROOT / "models/emotion_cnn.pt", map_location="cpu", weights_only=True))
+    cnn.load_state_dict(torch.load(ROOT / args.model, map_location="cpu", weights_only=True))
     model = Embedder(cnn).eval()
 
     dummy = torch.zeros(2, 1, 48, 48)
@@ -49,7 +51,7 @@ def main():
                       dynamo=False, opset_version=17)
 
     kv = EmotionKVCache()
-    kv.load(str(ROOT / "cache/emotion_cache.pt"))
+    kv.load(str(ROOT / args.cache))
     keys = kv.key_matrix.cpu().numpy()
     (WEB / "prototypes.json").write_text(json.dumps({
         "labels": kv.labels,

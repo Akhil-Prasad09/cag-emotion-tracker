@@ -31,6 +31,8 @@ def parse_args():
     p.add_argument("--embedding_dim", type=int, default=512)
     p.add_argument("--model_out", type=str, default="models/emotion_cnn.pt")
     p.add_argument("--cache_out", type=str, default="cache/emotion_cache.pt")
+    p.add_argument("--strong-jitter", action="store_true",
+                   help="wider shift/zoom augmentation; robust to detector framing (web demo model)")
     return p.parse_args()
 
 
@@ -64,7 +66,7 @@ def main():
     else:
         # Hold out 10% of train/ for checkpoint selection; test/ is only scored once, at the end.
         root = Path(args.data)
-        aug_ds, clean_ds = EmotionDataset(root / "train", augment=True), EmotionDataset(root / "train", augment=False)
+        aug_ds, clean_ds = EmotionDataset(root / "train", augment=True, strong_jitter=args.strong_jitter), EmotionDataset(root / "train", augment=False)
         perm = torch.randperm(len(aug_ds), generator=torch.Generator().manual_seed(0)).tolist()
         n_val = len(perm) // 10
         train_ds, val_ds = Subset(aug_ds, perm[n_val:]), Subset(clean_ds, perm[:n_val])

@@ -38,9 +38,16 @@ Training: 80 epochs, AdamW + cosine schedule, label smoothing, augmentation (fli
 
 ## Browser demo
 
-[`web/`](web/) runs the same model client-side: MediaPipe face detection, the CNN exported to ONNX (ONNX Runtime Web, WebGPU with a WASM fallback), mirror averaging, the prototype-cache lookup and smoothing, all in plain JavaScript with no build step. `python web/export.py --check-test fer2013/test` re-exports the model and confirms the export matches PyTorch (max difference 7e-8) and still scores 70.6%.
+[`web/`](web/) runs the model client-side: MediaPipe face detection, the CNN exported to ONNX (ONNX Runtime Web, WebGPU with a WASM fallback), mirror averaging, the prototype-cache lookup and smoothing, all in plain JavaScript with no build step.
 
-Face framing is the main difference from the desktop app. On a class-balanced sample of 1,305 test faces, the model scores 66.0% on exact FER-2013 crops and 60.5% on MediaPipe's face box, so expect a few points less in the browser than the headline number. Two choices were measured, not guessed: area-averaged downscaling like `cv2.INTER_AREA` (the canvas's built-in downscaling cost about 3 points), and a 10% crop margin, picked from 5–15% on training-split faces. Training with more crop jitter would narrow the gap.
+Face framing is the main difference from the desktop app: MediaPipe's face box crops faces differently from how FER-2013 was cropped. So the demo uses a second model trained with stronger shift/zoom augmentation (`python -m src.train --data fer2013 --epochs 100 --batch 128 --strong-jitter`), which handles that better. On a class-balanced sample of 1,305 test faces run through the browser pipeline:
+
+| Model | MediaPipe crop (what the demo sees) | Exact FER crop | Full test set |
+|---|---|---|---|
+| Default (`models/emotion_cnn.pt`) | 60.5% | 66.0% | 70.6% |
+| **Web (`models/emotion_cnn_web.pt`)** | **62.6%** | 66.5% | 70.1% |
+
+Two preprocessing choices were measured, not guessed: area-averaged downscaling like `cv2.INTER_AREA` (the canvas's built-in downscaling cost about 3 points), and a 10% crop margin, picked from 5–15% on training-split faces. `python web/export.py --check-test fer2013/test` re-exports the web model and confirms the export matches PyTorch (max difference under 1e-7) and still scores 70.1%.
 
 ## Run it
 
@@ -74,6 +81,7 @@ The hand-crafted baseline has its own scripts: `train_on_fer2013.py` trains it, 
 
 ```
 web/                       browser demo (GitHub Pages) + ONNX export script
+models/emotion_cnn_web.pt  framing-robust model used by the browser demo
 main.py                    OpenCV app (CNN + prototype cache)
 dashboard.py               Streamlit dashboard (CNN + prototype cache)
 src/train.py               training entry point
