@@ -2,6 +2,8 @@
 
 Real-time facial emotion recognition from a webcam, with a Streamlit dashboard. 70.6% accuracy on FER-2013 at about 8 ms per frame on a laptop CPU.
 
+**[Try the live demo](https://akhil-prasad09.github.io/cag-emotion-tracker/)**: runs entirely in your browser (webcam or a photo), nothing is uploaded.
+
 Detects 7 emotions: `angry` · `disgust` · `fear` · `happy` · `neutral` · `sad` · `surprise`
 
 B.Tech mini project (3-person team), 2024–25.
@@ -34,6 +36,12 @@ For reference, chance is about 14% and human agreement on FER-2013 is about 65%.
 
 Training: 80 epochs, AdamW + cosine schedule, label smoothing, augmentation (flip, rotation/shift/scale, brightness/contrast, random erasing), 10% of the train split held out for checkpoint selection. About 47 minutes on an Apple M5 GPU (MPS). Full numbers are in [models/emotion_cnn.json](models/emotion_cnn.json).
 
+## Browser demo
+
+[`web/`](web/) runs the same model client-side: MediaPipe face detection, the CNN exported to ONNX (ONNX Runtime Web, WebGPU with a WASM fallback), mirror averaging, the prototype-cache lookup and smoothing, all in plain JavaScript with no build step. `python web/export.py --check-test fer2013/test` re-exports the model and confirms the export matches PyTorch (max difference 7e-8) and still scores 70.6%.
+
+Face framing is the main difference from the desktop app. On a class-balanced sample of 1,305 test faces, the model scores 66.0% on exact FER-2013 crops and 60.5% on MediaPipe's face box, so expect a few points less in the browser than the headline number. Two choices were measured, not guessed: area-averaged downscaling like `cv2.INTER_AREA` (the canvas's built-in downscaling cost about 3 points), and a 10% crop margin, picked from 5–15% on training-split faces. Training with more crop jitter would narrow the gap.
+
 ## Run it
 
 Needs Python 3.10–3.12.
@@ -65,6 +73,7 @@ The hand-crafted baseline has its own scripts: `train_on_fer2013.py` trains it, 
 ## Layout
 
 ```
+web/                       browser demo (GitHub Pages) + ONNX export script
 main.py                    OpenCV app (CNN + prototype cache)
 dashboard.py               Streamlit dashboard (CNN + prototype cache)
 src/train.py               training entry point

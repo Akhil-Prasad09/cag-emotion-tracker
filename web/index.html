@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emotion Tracker Demo</title>
+<meta name="description" content="Real-time facial emotion recognition that runs entirely in your browser: CNN + prototype-cache lookup, 70.6% on FER-2013.">
+<style>
+  :root {
+    --bg: #f7f7f5; --surface: #ffffff; --text: #18181b; --muted: #6b6b73; --line: #e4e4e0;
+    --accent: #2563eb; --track: #ececea;
+    --angry: #dc2626; --disgust: #16a34a; --fear: #7c3aed; --happy: #d97706;
+    --neutral: #6b7280; --sad: #2563eb; --surprise: #0891b2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111113; --surface: #1a1a1d; --text: #ededed; --muted: #a0a0a8; --line: #2a2a2e;
+      --accent: #60a5fa; --track: #26262a;
+      --angry: #f87171; --disgust: #4ade80; --fear: #a78bfa; --happy: #fbbf24;
+      --neutral: #9ca3af; --sad: #60a5fa; --surprise: #22d3ee;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111113; --surface: #1a1a1d; --text: #ededed; --muted: #a0a0a8; --line: #2a2a2e;
+    --accent: #60a5fa; --track: #26262a;
+    --angry: #f87171; --disgust: #4ade80; --fear: #a78bfa; --happy: #fbbf24;
+    --neutral: #9ca3af; --sad: #60a5fa; --surprise: #22d3ee;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1040px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .lede { color: var(--muted); margin: 0 0 20px; max-width: 62ch; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+  button, .file {
+    font: inherit; padding: 9px 16px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--surface); color: var(--text);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  .file input { display: none; }
+  .grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .stage { padding: 0; overflow: hidden; aspect-ratio: 4 / 3; display: grid; place-items: center; }
+  canvas#view { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .placeholder { color: var(--muted); text-align: center; padding: 24px; }
+  .label { font-size: 2rem; font-weight: 650; text-transform: capitalize; margin: 0; min-height: 3rem; }
+  .conf { color: var(--muted); margin: 0 0 14px; min-height: 1.5em; }
+  .bars { display: grid; gap: 8px; }
+  .bar { display: grid; grid-template-columns: 74px 1fr 44px; align-items: center; gap: 8px; font-size: .9rem; }
+  .bar span:first-child { text-transform: capitalize; }
+  .bar span:last-child { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .track { height: 10px; background: var(--track); border-radius: 5px; overflow: hidden; }
+  .fill { height: 100%; width: 0; border-radius: 5px; transition: width .12s linear; }
+  .stats { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 16px; padding-top: 12px;
+           border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem;
+           font-variant-numeric: tabular-nums; }
+  .status { color: var(--muted); font-size: .9rem; min-height: 1.4em; margin: 0 0 12px; }
+  footer { margin-top: 24px; color: var(--muted); font-size: .85rem; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Emotion Tracker</h1>
+  <p class="lede">Real-time facial emotion recognition. Everything runs in your browser: your camera feed and photos never leave this device.
+    A CNN embeds each face and the emotion comes from a cache of 7 prototype embeddings. It scores 70.6% on the FER-2013 test set;
+    in-browser face detection frames faces a little differently, so expect a few points less here.</p>
+
+  <div class="controls">
+    <button id="cam" class="primary" disabled>Start camera</button>
+    <label class="file" id="photoLabel">Try a photo<input type="file" id="photo" accept="image/*"></label>
+  </div>
+  <p class="status" id="status" role="status">Loading model (20 MB)…</p>
+
+  <div class="grid">
+    <div class="panel stage">
+      <canvas id="view" width="640" height="480" hidden aria-label="Camera or photo with the detected face and emotion"></canvas>
+      <p class="placeholder" id="placeholder">Start the camera or pick a photo of a face.</p>
+    </div>
+    <div class="panel">
+      <p class="label" id="label">&nbsp;</p>
+      <p class="conf" id="conf"></p>
+      <div class="bars" id="bars"></div>
+      <div class="stats">
+        <span id="lat">Latency: –</span>
+        <span id="fps">FPS: –</span>
+        <span id="backend">Backend: –</span>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Trained on FER-2013 (48×48 grayscale faces); expect mistakes on unusual lighting, angles, and subtle expressions.
+    <a href="https://github.com/Akhil-Prasad09/cag-emotion-tracker">Code and results on GitHub</a>.
+  </footer>
+</main>
+
+<script type="module">
+import * as ort from "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.min.mjs";
+import { FilesetResolver, FaceDetector } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/vision_bundle.mjs";
+
+// TEMPERATURE / ALPHA / RESET_AFTER match src/modules/cag_engine.py. MARGIN is tuned for MediaPipe's
+// face box (the desktop app uses 0.15 around a Haar box): 0.10 scored best of 0.05–0.15 on training-split faces.
+const SIZE = 48, MARGIN = 0.10, TEMPERATURE = 0.08, ALPHA = 0.4, RESET_AFTER = 30;
+
+const $ = (id) => document.getElementById(id);
+const view = $("view"), ctx = view.getContext("2d");
+const crop = new OffscreenCanvas(1, 1), cropCtx = crop.getContext("2d", { willReadFrequently: true });
+const css = getComputedStyle(document.documentElement);
+
+let session, detector, labels, keys, backend;
+let smoothed = null, noFace = 0, running = false, busy = false, stream = null;
+const frameTimes = [];
+
+// ── Bars ─────────────────────────────────────────────────────
+function buildBars() {
+  $("bars").innerHTML = labels.map((l) => `
+    <div class="bar"><span>${l}</span>
+      <div class="track"><div class="fill" id="f-${l}" style="background:var(--${l})"></div></div>
+      <span id="p-${l}">–</span></div>`).join("");
+}
+function showScores(probs) {
+  labels.forEach((l, i) => {
+    $(`f-${l}`).style.width = probs ? `${(probs[i] * 100).toFixed(1)}%` : "0";
+    $(`p-${l}`).textContent = probs ? `${Math.round(probs[i] * 100)}%` : "–";
+  });
+}
+
+// ── Model ────────────────────────────────────────────────────
+async function load() {
+  ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/";
+  const proto = await (await fetch("prototypes.json")).json();
+  labels = proto.labels;
+  keys = proto.keys.map((k) => Float32Array.from(k));
+  buildBars();
+
+  const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm");
+  detector = await FaceDetector.createFromOptions(vision, {
+    baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite" },
+    runningMode: "IMAGE", minDetectionConfidence: 0.5,
+  });
+
+  const providers = "gpu" in navigator ? ["webgpu", "wasm"] : ["wasm"];
+  for (const ep of providers) {
+    try { session = await ort.InferenceSession.create("model.onnx", { executionProviders: [ep] }); backend = ep; break; }
+    catch (e) { console.warn(`ORT ${ep} unavailable`, e); }
+  }
+  if (!session) throw new Error("Could not start ONNX Runtime");
+  await embed(new Float32Array(2 * SIZE * SIZE));  // warm-up
+  $("backend").textContent = `Backend: ${backend === "webgpu" ? "WebGPU" : "WASM (CPU)"}`;
+  $("cam").disabled = false;
+  $("status").textContent = "Ready.";
+}
+
+async function embed(pixels) {
+  const out = await session.run({ face: new ort.Tensor("float32", pixels, [2, 1, SIZE, SIZE]) });
+  return out.embedding.data;  // (2, 512): face, mirrored face
+}
+
+// ── Pipeline: detect → crop → embed (face + mirror) → cache lookup → smooth ──
+function largestFace(source) {
+  const dets = detector.detect(source).detections;
+  if (!dets.length) return null;
+  return dets.map((d) => d.boundingBox).sort((a, b) => b.width * b.height - a.width * a.height)[0];
+}
+
+// Crop at full resolution, then area-average down to 48x48 like cv2.INTER_AREA.
+// The canvas's own downscaling cost ~3 points of accuracy in testing.
+function preprocess(source, box, W, H) {
+  const mx = box.width * MARGIN, my = box.height * MARGIN;
+  const x1 = Math.max(0, box.originX - mx), y1 = Math.max(0, box.originY - my);
+  const w = Math.min(W, box.originX + box.width + mx) - x1, h = Math.min(H, box.originY + box.height + my) - y1;
+  const cw = Math.max(1, Math.round(w)), ch = Math.max(1, Math.round(h));
+  crop.width = cw; crop.height = ch;
+  cropCtx.drawImage(source, x1, y1, w, h, 0, 0, cw, ch);
+  const rgba = cropCtx.getImageData(0, 0, cw, ch).data;
+  const gray = new Float32Array(cw * ch);
+  for (let i = 0; i < cw * ch; i++) gray[i] = 0.299 * rgba[4 * i] + 0.587 * rgba[4 * i + 1] + 0.114 * rgba[4 * i + 2];  // cv2 BGR2GRAY weights
+
+  const px = new Float32Array(2 * SIZE * SIZE), sx = cw / SIZE, sy = ch / SIZE;
+  for (let oy = 0; oy < SIZE; oy++) {
+    const ya = oy * sy, yb = ya + sy;
+    for (let ox = 0; ox < SIZE; ox++) {
+      const xa = ox * sx, xb = xa + sx;
+      let sum = 0, wsum = 0;
+      for (let y = Math.floor(ya); y < Math.min(Math.ceil(yb), ch); y++) {
+        const wy = Math.min(y + 1, yb) - Math.max(y, ya);
+        for (let x = Math.floor(xa); x < Math.min(Math.ceil(xb), cw); x++) {
+          const wgt = wy * (Math.min(x + 1, xb) - Math.max(x, xa));
+          sum += wgt * gray[y * cw + x]; wsum += wgt;
+        }
+      }
+      const v = (sum / wsum / 255 - 0.5) / 0.5;
+      px[oy * SIZE + ox] = v;                               // face
+      px[SIZE * SIZE + oy * SIZE + (SIZE - 1 - ox)] = v;    // mirrored face
+    }
+  }
+  return px;
+}
+
+function lookup(emb) {
+  const D = emb.length / 2, q = new Float32Array(D);
+  let norm = 0;
+  for (let i = 0; i < D; i++) { q[i] = emb[i] + emb[D + i]; norm += q[i] * q[i]; }
+  norm = Math.sqrt(norm) + 1e-8;
+  const logits = keys.map((k) => { let s = 0; for (let i = 0; i < D; i++) s += q[i] * k[i]; return s / norm / TEMPERATURE; });
+  const m = Math.max(...logits), e = logits.map((l) => Math.exp(l - m)), z = e.reduce((a, b) => a + b, 0);
+  return e.map((v) => v / z);
+}
+
+async function analyse(source, W, H, mirror) {
+  const t0 = performance.now();
+  const box = largestFace(source);
+  let probs = null;
+  if (box) {
+    noFace = 0;
+    const raw = lookup(await embed(preprocess(source, box, W, H)));
+    smoothed = smoothed && mirror ? smoothed.map((s, i) => ALPHA * raw[i] + (1 - ALPHA) * s) : raw;
+    probs = smoothed;
+  } else if (++noFace > RESET_AFTER || !mirror) {
+    smoothed = null;
+  }
+  draw(source, W, H, box, probs, mirror);
+  render(probs, performance.now() - t0, box);
+}
+
+// ── Drawing ──────────────────────────────────────────────────
+function draw(source, W, H, box, probs, mirror) {
+  view.width = W; view.height = H;
+  ctx.save();
+  if (mirror) { ctx.translate(W, 0); ctx.scale(-1, 1); }  // selfie view for the camera
+  ctx.drawImage(source, 0, 0, W, H);
+  ctx.restore();
+  if (!box) return;
+  const best = probs ? probs.indexOf(Math.max(...probs)) : -1;
+  const color = best >= 0 ? css.getPropertyValue(`--${labels[best]}`).trim() : "#888";
+  const x = mirror ? W - box.originX - box.width : box.originX;
+  ctx.lineWidth = Math.max(2, W / 240);
+  ctx.strokeStyle = color;
+  ctx.strokeRect(x, box.originY, box.width, box.height);
+  if (best >= 0) {
+    const text = labels[best];
+    ctx.font = `600 ${Math.max(16, W / 28)}px system-ui, sans-serif`;
+    const tw = ctx.measureText(text).width, th = Math.max(16, W / 28) * 1.4;
+    const ty = Math.max(0, box.originY - th);
+    ctx.fillStyle = color; ctx.fillRect(x, ty, tw + 16, th);
+    ctx.fillStyle = "#fff"; ctx.textBaseline = "middle"; ctx.fillText(text, x + 8, ty + th / 2);
+  }
+}
+
+function render(probs, ms, box) {
+  showScores(probs);
+  if (probs) {
+    const best = probs.indexOf(Math.max(...probs));
+    $("label").textContent = labels[best];
+    $("label").style.color = `var(--${labels[best]})`;
+    $("conf").textContent = `${Math.round(probs[best] * 100)}% confidence`;
+  } else {
+    $("label").innerHTML = "&nbsp;";
+    $("conf").textContent = box === null ? "No face found" : "";
+  }
+  $("lat").textContent = `Latency: ${ms.toFixed(0)} ms`;
+  const now = performance.now();
+  frameTimes.push(now);
+  while (frameTimes.length && now - frameTimes[0] > 1000) frameTimes.shift();
+  $("fps").textContent = `FPS: ${running ? frameTimes.length : "–"}`;
+}
+
+function showCanvas() { view.hidden = false; $("placeholder").hidden = true; }
+
+// ── Camera ───────────────────────────────────────────────────
+const video = document.createElement("video");
+video.muted = true; video.playsInline = true;
+
+async function loop() {
+  if (!running) return;
+  if (!busy && video.readyState >= 2) {
+    busy = true;
+    try { await analyse(video, video.videoWidth, video.videoHeight, true); } finally { busy = false; }
+  }
+  requestAnimationFrame(loop);
+}
+
+$("cam").onclick = async () => {
+  if (running) {
+    running = false; stream.getTracks().forEach((t) => t.stop());
+    $("cam").textContent = "Start camera"; $("status").textContent = "Camera stopped.";
+    return;
+  }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: "user" }, audio: false });
+  } catch (e) {
+    $("status").textContent = "Camera unavailable or permission denied. You can still try a photo.";
+    return;
+  }
+  video.srcObject = stream; await video.play();
+  smoothed = null; running = true; showCanvas();
+  $("cam").textContent = "Stop camera"; $("status").textContent = "Running locally on your device.";
+  loop();
+};
+
+// ── Photo ────────────────────────────────────────────────────
+$("photo").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file || !session) return;
+  if (running) $("cam").click();
+  const img = await createImageBitmap(file);
+  const scale = Math.min(1, 1280 / Math.max(img.width, img.height));
+  const W = Math.round(img.width * scale), H = Math.round(img.height * scale);
+  const canvas = new OffscreenCanvas(W, H);
+  canvas.getContext("2d").drawImage(img, 0, 0, W, H);
+  smoothed = null; showCanvas();
+  await analyse(canvas, W, H, false);
+  $("status").textContent = "Photo analysed locally.";
+  e.target.value = "";
+};
+
+load().catch((e) => { console.error(e); $("status").textContent = `Failed to load: ${e.message}`; });
+</script>
+</body>
+</html>
