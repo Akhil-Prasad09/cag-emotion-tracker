@@ -6,7 +6,7 @@ Real-time facial emotion recognition from a webcam, with a Streamlit dashboard. 
 
 Detects 7 emotions: `angry` · `disgust` · `fear` · `happy` · `neutral` · `sad` · `surprise`
 
-B.Tech mini project (3-person team), 2024–25.
+B.Tech mini project (3-person team), 2024-25.
 
 ## How it works
 
@@ -19,7 +19,7 @@ webcam frame → Haar face detector → 48×48 grayscale crop
             → overlay / dashboard
 ```
 
-"Cache-augmented" means the classification step is a lookup into a small cache that sits in memory. Each prototype is the mean embedding of one emotion over the training set, built once after training. At inference, the label is the prototype with the highest cosine similarity: no classifier head, no retrieval index, no I/O. [docs/CAG_EXPLAINED.md](docs/CAG_EXPLAINED.md) has the details.
+"Cache-augmented" means the classification step is a lookup into a small cache that sits in memory. Each prototype is the mean embedding of one emotion over the training set, built once after training. At inference the label is simply the prototype with the highest cosine similarity, so there is no classifier head, retrieval index or I/O involved. [docs/CAG_EXPLAINED.md](docs/CAG_EXPLAINED.md) has the details.
 
 ## Results
 
@@ -28,8 +28,8 @@ FER-2013 test set (7,178 held-out images, never used for training or checkpoint 
 | | Test accuracy | Per-frame latency |
 |---|---|---|
 | **CNN + prototype cache, mirror-averaged (default)** | **70.6%** | 8.2 ms mean · 8.6 ms p95 |
-| CNN + prototype cache, single pass | 69.7% | — |
-| CNN + classifier head, mirror-averaged | 70.6% | — |
+| CNN + prototype cache, single pass | 69.7% | n/a |
+| CNN + classifier head, mirror-averaged | 70.6% | n/a |
 | Baseline: hand-crafted features + MLP (`run.py`) | 38.2% | 4.8 ms |
 
 For reference, chance is about 14% and human agreement on FER-2013 is about 65%. Per-class recall ranges from 47% (fear) to 89% (happy). Each CNN pass takes about 2 ms, the cache lookup 0.007 ms, and face detection most of the rest.
@@ -40,18 +40,18 @@ Training: 80 epochs, AdamW + cosine schedule, label smoothing, augmentation (fli
 
 [`web/`](web/) runs the model client-side: MediaPipe face detection, the CNN exported to ONNX (ONNX Runtime Web, WebGPU with a WASM fallback), mirror averaging, the prototype-cache lookup and smoothing, all in plain JavaScript with no build step.
 
-Face framing is the main difference from the desktop app: MediaPipe's face box crops faces differently from how FER-2013 was cropped. So the demo uses a second model trained with stronger shift/zoom augmentation (`python -m src.train --data fer2013 --epochs 100 --batch 128 --strong-jitter`), which handles that better. On a class-balanced sample of 1,305 test faces run through the browser pipeline:
+Face framing is the main difference from the desktop app, because MediaPipe's face box crops faces differently from the way FER-2013 was cropped. The demo therefore uses a second model trained with stronger shift/zoom augmentation (`python -m src.train --data fer2013 --epochs 100 --batch 128 --strong-jitter`), which handles that better. On a class-balanced sample of 1,305 test faces run through the browser pipeline:
 
 | Model | MediaPipe crop (what the demo sees) | Exact FER crop | Full test set |
 |---|---|---|---|
 | Default (`models/emotion_cnn.pt`) | 60.5% | 66.0% | 70.6% |
 | **Web (`models/emotion_cnn_web.pt`)** | **62.6%** | 66.5% | 70.1% |
 
-Two preprocessing choices were measured, not guessed: area-averaged downscaling like `cv2.INTER_AREA` (the canvas's built-in downscaling cost about 3 points), and a 10% crop margin, picked from 5–15% on training-split faces. `python web/export.py --check-test fer2013/test` re-exports the web model and confirms the export matches PyTorch (max difference under 1e-7) and still scores 70.1%.
+Two preprocessing choices came from measurements. Downscaling uses area averaging like `cv2.INTER_AREA`, since the canvas's built-in downscaling cost about 3 points. The crop margin is 10%, picked from values of 5 to 15% on training-split faces. `python web/export.py --check-test fer2013/test` re-exports the web model and confirms the export matches PyTorch (max difference under 1e-7) and still scores 70.1%.
 
 ## Run it
 
-Needs Python 3.10–3.12.
+Needs Python 3.10 to 3.12.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate

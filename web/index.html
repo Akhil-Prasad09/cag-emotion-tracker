@@ -68,8 +68,8 @@
 <main>
   <h1>Emotion Tracker</h1>
   <p class="lede">Real-time facial emotion recognition. Everything runs in your browser: your camera feed and photos never leave this device.
-    A CNN embeds each face and the emotion comes from a cache of 7 prototype embeddings. It scores 70.6% on the FER-2013 test set;
-    in-browser face detection frames faces a little differently, so expect a few points less here.</p>
+    A CNN embeds each face, and the emotion is the closest of 7 cached prototype embeddings. It scores 70.6% on the FER-2013 test set.
+    Face detection in the browser frames faces a little differently, so expect a few points less here.</p>
 
   <div class="controls">
     <button id="cam" class="primary" disabled>Start camera</button>
@@ -95,7 +95,7 @@
   </div>
 
   <footer>
-    Trained on FER-2013 (48×48 grayscale faces); expect mistakes on unusual lighting, angles, and subtle expressions.
+    Trained on FER-2013 (48×48 grayscale faces). Expect mistakes with unusual lighting or camera angles, and with subtle expressions.
     <a href="https://github.com/Akhil-Prasad09/cag-emotion-tracker">Code and results on GitHub</a>.
   </footer>
 </main>
